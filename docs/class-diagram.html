@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Enough Procrastination — Class Diagrams</title>
+<style>
+  body { font-family: "Segoe UI", Arial, sans-serif; margin: 24px; background: #fff; color: #1f2430; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 28px 0 8px; }
+  p.sub { color: #7a8294; margin: 0 0 12px; font-size: 13px; }
+  .diagram { border: 1px solid #e3e6ef; border-radius: 8px; padding: 12px; background: #fff; display: table; }
+  .mermaid svg { max-width: none !important; }
+</style>
+</head>
+<body>
+<h1>Enough Procrastination — Class Diagrams (CP3, beta)</h1>
+<p class="sub">Jisu Han, 233950 · Mermaid source is in this page; PlantUML source is <code>docs/class-diagram.puml</code>. Both describe the beta code in <code>app/src/main/java</code>.</p>
+
+<h2 id="model">Figure 1. Domain model and local storage (ep.model, ep.storage)</h2>
+<div class="diagram" id="model-diagram">
+<pre class="mermaid">
+classDiagram
+direction LR
+
+class CalendarItem {
+  &lt;&lt;interface&gt;&gt;
+  +getId() String
+  +getTitle() String
+  +getDate() LocalDate
+  +getStartTime() LocalTime
+  +getEndTime() LocalTime
+  +isAllDay() boolean
+  +getCourseId() String
+  +getType() ItemType
+  +overlaps(date, start, end) boolean
+  +overlaps(other) boolean
+}
+class ItemType {
+  &lt;&lt;enumeration&gt;&gt;
+  EVENT
+  STUDY_BLOCK
+}
+class Course {
+  -id : String
+  -name : String
+  -color : String
+}
+class Event {
+  -id : String
+  -title : String
+  -date : LocalDate
+  -startTime : LocalTime
+  -endTime : LocalTime
+  -allDay : boolean
+  -courseId : String
+  +setTime(allDay, start, end)
+}
+class Assignment {
+  -id : String
+  -title : String
+  -dueDate : LocalDate
+  -estimatedHours : int
+  -blockLength : int
+  -courseId : String
+  -completedHours : int
+  -complete : boolean
+  +getRemainingHours() int
+}
+class StudyBlock {
+  -id : String
+  -assignmentId : String
+  -title : String
+  -courseId : String
+  -date : LocalDate
+  -startTime : LocalTime
+  -endTime : LocalTime
+  +getHours() int
+}
+class CalendarFilter {
+  -keyword : String
+  -courseId : String
+  -type : ItemType
+  -from : LocalDate
+  -to : LocalDate
+  +matches(item) boolean
+  +isEmpty() boolean
+}
+class PlanResult {
+  -unscheduledHours : int
+  +getBlocks() List~StudyBlock~
+  +getScheduledHours() int
+  +hasShortage() boolean
+  +describe() String
+}
+class ProgressReport {
+  -unscheduledHours : int
+  +getEstimatedHours() int
+  +getCompletedHours() int
+  +getRemainingHours() int
+  +hasShortage() boolean
+  +getRatio() double
+}
+class ValidationException {
+  &lt;&lt;RuntimeException&gt;&gt;
+  +ValidationException(message)
+}
+class DataStore {
+  -courses : List~Course~
+  -events : List~Event~
+  -assignments : List~Assignment~
+  -blocks : List~StudyBlock~
+  +newId()$ String
+  +findCourse(id) Optional~Course~
+  +findEvent(id) Optional~Event~
+  +findAssignment(id) Optional~Assignment~
+  +getBlocksOf(assignmentId) List~StudyBlock~
+  +removeBlocksOf(assignmentId)
+  +getAllItems() List~CalendarItem~
+}
+class LocalStorage {
+  -directory : Path
+  +load(store : DataStore)
+  +save(store : DataStore)
+  -join(fields)$ String
+  -split(line)$ String[]
+}
+
+CalendarItem <|.. Event
+CalendarItem <|.. StudyBlock
+CalendarItem ..> ItemType
+Assignment "1" --> "0..*" StudyBlock : generated blocks
+Event "*" --> "0..1" Course : courseId
+Assignment "*" --> "0..1" Course : courseId
+PlanResult --> Assignment
+PlanResult --> "*" StudyBlock
+ProgressReport --> Assignment
+CalendarFilter ..> CalendarItem : matches()
+DataStore o-- "*" Course
+DataStore o-- "*" Event
+DataStore o-- "*" Assignment
+DataStore o-- "*" StudyBlock
+LocalStorage ..> DataStore : load / save (courses.txt, events.txt, assignments.txt, blocks.txt)
+</pre>
+</div>
+
+<h2 id="service">Figure 2. Service layer and API facade (ep.service, ep.api) — one manager per use case</h2>
+<div class="diagram" id="service-diagram">
+<pre class="mermaid">
+classDiagram
+direction TB
+
+class EnoughProcrastination {
+  &lt;&lt;Facade&gt;&gt;
+  -lastMessage : String
+  -warning : boolean
+  +EnoughProcrastination(dataDirectory : Path)
+  +manageCourse(actionType, name, color) boolean
+  +manageEvent(actionType, title, date, startTime, endTime, isAllDay) boolean
+  +planAssignment(title, dueDate, totalHours, blockLength) List~StudyBlock~
+  +filterCalendar(keyword, courseName, dateRange) List~CalendarItem~
+  +trackProgress(assignment, completedHours, isComplete) int
+  +courses() CourseManager
+  +events() EventManager
+  +assignments() AssignmentManager
+  +calendar() CalendarManager
+  +progress() ProgressManager
+  +scheduler() ScheduleManager
+  +getLastMessage() String
+  +hasWarning() boolean
+}
+class BaseManager {
+  &lt;&lt;abstract&gt;&gt;
+  #store : DataStore
+  #storage : LocalStorage
+  #persist()
+  #requireText(value, what) String$
+  #requireNonNull(value, what)$
+  #validCourseId(courseId) String
+}
+class CourseManager {
+  &lt;&lt;UC1 Manage Courses&gt;&gt;
+  +addCourse(name, color) Course
+  +editCourse(id, name, color) Course
+  +deleteCourse(id) boolean
+  +findByName(name) Optional~Course~
+  +getCourses() List~Course~
+}
+class EventManager {
+  &lt;&lt;UC2 Manage Events&gt;&gt;
+  +addEvent(title, date, allDay, start, end, courseId) EventResult
+  +editEvent(id, title, date, allDay, start, end, courseId) EventResult
+  +deleteEvent(id) boolean
+  -clearDisplacedBlocks(event) List~PlanResult~
+}
+class EventResult {
+  +getEvent() Event
+  +getReplans() List~PlanResult~
+}
+class AssignmentManager {
+  &lt;&lt;UC3 Plan Assignment&gt;&gt;
+  +addAssignment(title, dueDate, estimatedHours, blockLength, courseId) PlanResult
+  +editAssignment(id, title, dueDate, estimatedHours, blockLength, courseId) PlanResult
+  +deleteAssignment(id) boolean
+  +replan(assignment) PlanResult
+  +getBlocks(assignmentId) List~StudyBlock~
+}
+class ScheduleManager {
+  &lt;&lt;Planner&gt;&gt;
+  +DAY_START : LocalTime = 09:00$
+  +DAY_END : LocalTime = 22:00$
+  +STEP_MINUTES : int = 30$
+  -clock : Clock
+  +plan(assignment, hours) PlanResult
+  +findLatestFreeStart(day, hours, pending) LocalTime
+  +isFree(day, start, end, pending) boolean
+  +findBlocksOverlapping(event) List~StudyBlock~
+  +today() LocalDate
+}
+class CalendarManager {
+  &lt;&lt;UC4 View, Search, Filter&gt;&gt;
+  +filter(filter) List~CalendarItem~
+  +itemsOn(day, filter) List~CalendarItem~
+  +itemsBetween(from, to, filter) List~CalendarItem~
+  +itemsForMonth(month, filter) List~CalendarItem~
+  +itemsForWeek(anyDay, filter) List~CalendarItem~
+}
+class ProgressManager {
+  &lt;&lt;UC5 Track Progress&gt;&gt;
+  +getReport(assignment) ProgressReport
+  +recordProgress(assignmentId, completedHours) ProgressReport
+  +markComplete(assignmentId) ProgressReport
+  +reopen(assignmentId, completedHours) ProgressReport
+}
+class DataStore {
+  in-memory lists
+}
+class LocalStorage {
+  text files
+}
+class ValidationException {
+  &lt;&lt;RuntimeException&gt;&gt;
+}
+
+EnoughProcrastination *--> DataStore
+EnoughProcrastination *--> LocalStorage
+EnoughProcrastination *--> ScheduleManager
+EnoughProcrastination *--> CourseManager
+EnoughProcrastination *--> EventManager
+EnoughProcrastination *--> AssignmentManager
+EnoughProcrastination *--> CalendarManager
+EnoughProcrastination *--> ProgressManager
+
+BaseManager <|-- CourseManager
+BaseManager <|-- EventManager
+BaseManager <|-- AssignmentManager
+BaseManager <|-- ProgressManager
+BaseManager --> DataStore
+BaseManager --> LocalStorage : persist()
+BaseManager ..> ValidationException : throws
+
+AssignmentManager --> ScheduleManager : plan()
+EventManager --> ScheduleManager : findBlocksOverlapping()
+EventManager --> AssignmentManager : replan()
+EventManager ..> EventResult : returns
+ProgressManager --> AssignmentManager : replan()
+CalendarManager --> DataStore : read only
+ScheduleManager --> DataStore : busy time
+</pre>
+</div>
+
+<h2 id="gui">Figure 3. GUI (ep.ui, Java Swing) and program entry (ep)</h2>
+<div class="diagram" id="gui-diagram">
+<pre class="mermaid">
+classDiagram
+direction TB
+
+class Main {
+  +main(args)$
+  -captureAndExit(frame, app, dir)$
+}
+class DemoData {
+  +seed(app)$
+}
+class EnoughProcrastination {
+  &lt;&lt;Facade&gt;&gt;
+}
+class MainFrame {
+  &lt;&lt;JFrame&gt;&gt;
+  -anchor : LocalDate
+  -weekMode : boolean
+  +refresh()
+  +setWeekMode(week)
+  -addCourse() / editCourse(c) / deleteCourse(c)
+  -addEventOn(day) / editEvent(e) / openItem(item)
+  -addAssignment() / editAssignment(a) / deleteAssignment(a)
+  -trackProgress(a) / markComplete(a)
+}
+class CalendarView {
+  &lt;&lt;abstract JPanel&gt;&gt;
+  #items : List~CalendarItem~
+  #anchor : LocalDate
+  #hits : List~Hit~
+  +setData(anchor, today, items, courses)
+  +setOnItemClicked(listener)
+  +setOnDayDoubleClicked(listener)
+}
+class MonthView {
+  #paintComponent(g)
+}
+class WeekView {
+  #paintComponent(g)
+}
+class CoursePanel {
+  &lt;&lt;JPanel&gt;&gt;
+  +setCourses(courses)
+  +getSelected() Course
+}
+class AssignmentPanel {
+  &lt;&lt;JPanel&gt;&gt;
+  +setAssignments(assignments, reports, courses, today)
+  +getSelected() Assignment
+}
+class FilterBar {
+  &lt;&lt;JPanel&gt;&gt;
+  +getFilter() CalendarFilter
+  +setCourses(courses)
+  +selectCourse(courseId)
+  +clearAll()
+}
+class FormDialog {
+  &lt;&lt;abstract JDialog&gt;&gt;
+  -accepted : boolean
+  +showDialog() boolean
+  #apply()*
+}
+class CourseDialog {
+  +getResult() Course
+}
+class EventDialog {
+  +getResult() EventResult
+}
+class AssignmentDialog {
+  +getResult() PlanResult
+}
+class ProgressDialog {
+  +getResult() ProgressReport
+}
+class CourseCombo {
+  &lt;&lt;JComboBox&gt;&gt;
+  +getSelectedCourseId() String
+}
+class UiTheme {
+  &lt;&lt;utility&gt;&gt;
+  +drawChip(g, x, y, w, h, base, type, text, sub)$
+  +colorOf(item, courseLookup)$ Color
+}
+class Fields {
+  &lt;&lt;utility&gt;&gt;
+  +dateSpinner(initial)$ JSpinner
+  +timeSpinner(initial)$ JSpinner
+  +addRow(form, row, label, field)$
+}
+
+Main ..> MainFrame : creates
+Main ..> EnoughProcrastination : creates
+Main ..> DemoData : demo mode
+DemoData ..> EnoughProcrastination
+MainFrame --> EnoughProcrastination : app
+MainFrame *-- MonthView
+MainFrame *-- WeekView
+MainFrame *-- CoursePanel
+MainFrame *-- AssignmentPanel
+MainFrame *-- FilterBar
+CalendarView <|-- MonthView
+CalendarView <|-- WeekView
+FormDialog <|-- CourseDialog
+FormDialog <|-- EventDialog
+FormDialog <|-- AssignmentDialog
+FormDialog <|-- ProgressDialog
+MainFrame ..> CourseDialog
+MainFrame ..> EventDialog
+MainFrame ..> AssignmentDialog
+MainFrame ..> ProgressDialog
+EventDialog *-- CourseCombo
+AssignmentDialog *-- CourseCombo
+FilterBar *-- CourseCombo
+CalendarView ..> UiTheme
+FormDialog ..> Fields
+</pre>
+</div>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "loose",
+    htmlLabels: false, class: { htmlLabels: false },
+    themeVariables: { fontFamily: "Segoe UI, Arial, sans-serif", fontSize: "13px" } });
+  await mermaid.run();
+  // Give every diagram its natural size so nothing is squeezed.
+  for (const svg of document.querySelectorAll(".mermaid svg")) {
+    const [, , w, h] = svg.getAttribute("viewBox").split(/\s+/).map(Number);
+    svg.style.maxWidth = "none";
+    svg.style.width = w + "px";
+    svg.style.height = h + "px";
+    svg.setAttribute("width", w);
+    svg.setAttribute("height", h);
+  }
+  document.body.dataset.ready = "1";
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+node_modules
+dist
+.figma-ref
+
+# Java build output
+app/out/
+*.class
+
+# Python
+__pycache__/
+*.pyc
+
+# OS / editor
+.DS_Store
+Thumbs.db

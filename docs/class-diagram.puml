@@ -1,0 +1,339 @@
+@startuml EnoughProcrastination-Core
+' Enough Procrastination - core class diagram (model, storage, service, api)
+' Render: https://www.plantuml.com/plantuml  or  plantuml docs/class-diagram.puml
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam packageStyle rectangle
+hide empty members
+
+package "ep.api" {
+  class EnoughProcrastination <<Facade>> {
+    - lastMessage : String
+    + EnoughProcrastination(dataDirectory : Path)
+    + manageCourse(actionType, name, color) : boolean
+    + manageEvent(actionType, title, date, startTime, endTime, isAllDay) : boolean
+    + planAssignment(title, dueDate, totalHours, blockLength) : List<StudyBlock>
+    + filterCalendar(keyword, courseName, dateRange) : List<CalendarItem>
+    + trackProgress(assignment, completedHours, isComplete) : int
+    + courses() : CourseManager
+    + events() : EventManager
+    + assignments() : AssignmentManager
+    + calendar() : CalendarManager
+    + progress() : ProgressManager
+    + getLastMessage() : String
+    + hasWarning() : boolean
+  }
+}
+
+package "ep.service" {
+  abstract class BaseManager {
+    # store : DataStore
+    # storage : LocalStorage
+    # persist()
+    # {static} requireText(value, what) : String
+    # validCourseId(courseId) : String
+  }
+  class CourseManager <<UC1>> {
+    + addCourse(name, color) : Course
+    + editCourse(id, name, color) : Course
+    + deleteCourse(id) : boolean
+    + findByName(name) : Optional<Course>
+    + getCourses() : List<Course>
+  }
+  class EventManager <<UC2>> {
+    + addEvent(title, date, allDay, start, end, courseId) : EventResult
+    + editEvent(id, title, date, allDay, start, end, courseId) : EventResult
+    + deleteEvent(id) : boolean
+    - clearDisplacedBlocks(event) : List<PlanResult>
+  }
+  class "EventManager.EventResult" as EventResult {
+    + getEvent() : Event
+    + getReplans() : List<PlanResult>
+  }
+  class AssignmentManager <<UC3>> {
+    + addAssignment(title, dueDate, estimatedHours, blockLength, courseId) : PlanResult
+    + editAssignment(id, title, dueDate, estimatedHours, blockLength, courseId) : PlanResult
+    + deleteAssignment(id) : boolean
+    + replan(assignment) : PlanResult
+    + getBlocks(assignmentId) : List<StudyBlock>
+  }
+  class ScheduleManager <<Planner>> {
+    + {static} DAY_START : LocalTime = 09:00
+    + {static} DAY_END : LocalTime = 22:00
+    + {static} STEP_MINUTES : int = 30
+    - clock : Clock
+    + plan(assignment, hours) : PlanResult
+    + findLatestFreeStart(day, hours, pending) : LocalTime
+    + isFree(day, start, end, pending) : boolean
+    + findBlocksOverlapping(event) : List<StudyBlock>
+    + today() : LocalDate
+  }
+  class CalendarManager <<UC4>> {
+    + filter(filter) : List<CalendarItem>
+    + itemsForMonth(month, filter) : List<CalendarItem>
+    + itemsForWeek(anyDay, filter) : List<CalendarItem>
+    + itemsBetween(from, to, filter) : List<CalendarItem>
+  }
+  class ProgressManager <<UC5>> {
+    + getReport(assignment) : ProgressReport
+    + recordProgress(assignmentId, completedHours) : ProgressReport
+    + markComplete(assignmentId) : ProgressReport
+    + reopen(assignmentId, completedHours) : ProgressReport
+  }
+}
+
+package "ep.storage" {
+  class DataStore {
+    - courses : List<Course>
+    - events : List<Event>
+    - assignments : List<Assignment>
+    - blocks : List<StudyBlock>
+    + {static} newId() : String
+    + findCourse(id) / findEvent(id) / findAssignment(id)
+    + getBlocksOf(assignmentId) : List<StudyBlock>
+    + removeBlocksOf(assignmentId)
+    + getAllItems() : List<CalendarItem>
+  }
+  class LocalStorage {
+    - directory : Path
+    + load(store : DataStore)
+    + save(store : DataStore)
+  }
+}
+
+package "ep.model" {
+  interface CalendarItem {
+    + getId() : String
+    + getTitle() : String
+    + getDate() : LocalDate
+    + getStartTime() : LocalTime
+    + getEndTime() : LocalTime
+    + isAllDay() : boolean
+    + getCourseId() : String
+    + getType() : ItemType
+    + overlaps(date, start, end) : boolean
+  }
+  enum ItemType {
+    EVENT
+    STUDY_BLOCK
+  }
+  class Course {
+    - id : String
+    - name : String
+    - color : String
+  }
+  class Event {
+    - id : String
+    - title : String
+    - date : LocalDate
+    - startTime : LocalTime
+    - endTime : LocalTime
+    - allDay : boolean
+    - courseId : String
+  }
+  class Assignment {
+    - id : String
+    - title : String
+    - dueDate : LocalDate
+    - estimatedHours : int
+    - blockLength : int
+    - courseId : String
+    - completedHours : int
+    - complete : boolean
+    + getRemainingHours() : int
+  }
+  class StudyBlock {
+    - id : String
+    - assignmentId : String
+    - date : LocalDate
+    - startTime : LocalTime
+    - endTime : LocalTime
+    + getHours() : int
+  }
+  class CalendarFilter {
+    - keyword : String
+    - courseId : String
+    - type : ItemType
+    - from : LocalDate
+    - to : LocalDate
+    + matches(item) : boolean
+    + isEmpty() : boolean
+  }
+  class PlanResult {
+    - unscheduledHours : int
+    + getBlocks() : List<StudyBlock>
+    + hasShortage() : boolean
+    + describe() : String
+  }
+  class ProgressReport {
+    - unscheduledHours : int
+    + getEstimatedHours() / getCompletedHours() / getRemainingHours() : int
+    + hasShortage() : boolean
+    + getRatio() : double
+  }
+  class ValidationException <<RuntimeException>>
+}
+
+' ---- relationships ----
+EnoughProcrastination *--> "1" DataStore
+EnoughProcrastination *--> "1" LocalStorage
+EnoughProcrastination *--> "1" ScheduleManager
+EnoughProcrastination *--> "1" CourseManager
+EnoughProcrastination *--> "1" EventManager
+EnoughProcrastination *--> "1" AssignmentManager
+EnoughProcrastination *--> "1" CalendarManager
+EnoughProcrastination *--> "1" ProgressManager
+
+BaseManager <|-- CourseManager
+BaseManager <|-- EventManager
+BaseManager <|-- AssignmentManager
+BaseManager <|-- ProgressManager
+BaseManager --> DataStore
+BaseManager --> LocalStorage : persist()
+
+AssignmentManager --> ScheduleManager : plan()
+EventManager --> ScheduleManager : findBlocksOverlapping()
+EventManager --> AssignmentManager : replan()
+EventManager +-- EventResult
+ProgressManager --> AssignmentManager : replan()
+CalendarManager --> DataStore
+ScheduleManager --> DataStore : busy time
+LocalStorage ..> DataStore : load / save
+
+DataStore o-- "*" Course
+DataStore o-- "*" Event
+DataStore o-- "*" Assignment
+DataStore o-- "*" StudyBlock
+
+CalendarItem <|.. Event
+CalendarItem <|.. StudyBlock
+CalendarItem ..> ItemType
+Assignment "1" --> "0..*" StudyBlock : generated blocks
+Event "*" --> "0..1" Course : courseId
+Assignment "*" --> "0..1" Course : courseId
+PlanResult --> Assignment
+PlanResult --> "*" StudyBlock
+ProgressReport --> Assignment
+CalendarFilter ..> CalendarItem : matches()
+EventResult --> Event
+EventResult --> "*" PlanResult
+BaseManager ..> ValidationException : throws
+@enduml
+
+@startuml EnoughProcrastination-GUI
+' Enough Procrastination - GUI class diagram (ep.ui)
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam packageStyle rectangle
+hide empty members
+
+package "ep" {
+  class Main {
+    + {static} main(args : String[])
+    - {static} captureAndExit(frame, app, dir)
+  }
+  class DemoData {
+    + {static} seed(app : EnoughProcrastination)
+  }
+}
+
+package "ep.api" {
+  class EnoughProcrastination <<Facade>>
+}
+
+package "ep.ui" {
+  class MainFrame <<JFrame>> {
+    - anchor : LocalDate
+    - weekMode : boolean
+    + refresh()
+    + setWeekMode(week : boolean)
+    - addCourse() / editCourse(c) / deleteCourse(c)
+    - addEventOn(day) / editEvent(e) / openItem(item)
+    - addAssignment() / editAssignment(a) / deleteAssignment(a)
+    - trackProgress(a) / markComplete(a)
+  }
+  abstract class CalendarView <<JPanel>> {
+    # items : List<CalendarItem>
+    # anchor : LocalDate
+    # hits : List<Hit>
+    + setData(anchor, today, items, courses)
+    + setOnItemClicked(listener)
+    + setOnDayDoubleClicked(listener)
+  }
+  class MonthView {
+    # paintComponent(g)
+  }
+  class WeekView {
+    # paintComponent(g)
+  }
+  class CoursePanel <<JPanel>> {
+    + setCourses(courses)
+    + getSelected() : Course
+  }
+  class AssignmentPanel <<JPanel>> {
+    + setAssignments(assignments, reports, courses, today)
+    + getSelected() : Assignment
+  }
+  class FilterBar <<JPanel>> {
+    + getFilter() : CalendarFilter
+    + setCourses(courses)
+    + selectCourse(courseId)
+    + clearAll()
+  }
+  abstract class FormDialog <<JDialog>> {
+    - accepted : boolean
+    + showDialog() : boolean
+    # {abstract} apply()
+  }
+  class CourseDialog {
+    + getResult() : Course
+  }
+  class EventDialog {
+    + getResult() : EventManager.EventResult
+  }
+  class AssignmentDialog {
+    + getResult() : PlanResult
+  }
+  class ProgressDialog {
+    + getResult() : ProgressReport
+  }
+  class CourseCombo <<JComboBox>> {
+    + getSelectedCourseId() : String
+  }
+  class UiTheme <<utility>> {
+    + {static} drawChip(g, x, y, w, h, base, type, text, sub)
+    + {static} colorOf(item, courseLookup) : Color
+  }
+  class Fields <<utility>> {
+    + {static} dateSpinner(initial) : JSpinner
+    + {static} timeSpinner(initial) : JSpinner
+    + {static} addRow(form, row, label, field)
+  }
+}
+
+Main ..> MainFrame : creates
+Main ..> EnoughProcrastination : creates
+Main ..> DemoData : --demo
+DemoData ..> EnoughProcrastination
+MainFrame --> EnoughProcrastination : app
+MainFrame *-- MonthView
+MainFrame *-- WeekView
+MainFrame *-- CoursePanel
+MainFrame *-- AssignmentPanel
+MainFrame *-- FilterBar
+CalendarView <|-- MonthView
+CalendarView <|-- WeekView
+FormDialog <|-- CourseDialog
+FormDialog <|-- EventDialog
+FormDialog <|-- AssignmentDialog
+FormDialog <|-- ProgressDialog
+MainFrame ..> CourseDialog
+MainFrame ..> EventDialog
+MainFrame ..> AssignmentDialog
+MainFrame ..> ProgressDialog
+EventDialog *-- CourseCombo
+AssignmentDialog *-- CourseCombo
+FilterBar *-- CourseCombo
+CalendarView ..> UiTheme
+FormDialog ..> Fields
+@enduml
